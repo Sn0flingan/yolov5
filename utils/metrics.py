@@ -73,6 +73,13 @@ def ap_per_class(tp, conf, pred_cls, target_cls, plot=False, save_dir='.', names
         plot_mc_curve(px, f1, Path(save_dir) / 'F1_curve.png', names, ylabel='F1')
         plot_mc_curve(px, p, Path(save_dir) / 'P_curve.png', names, ylabel='Precision')
         plot_mc_curve(px, r, Path(save_dir) / 'R_curve.png', names, ylabel='Recall')
+    
+    # save p and r as file
+    res = np.concatenate((px, f1, p, r), axis=0)
+    np.savetxt(Path(save_dir) / 'results_as_text.csv', res, delimiter=",")
+    res = np.concatenate((px, py, ap), axis=0)
+    np.savetxt(Path(save_dir) / 'pr_as_text.csv', res, delimiter=",")
+
 
     print(f"px:{px.shape}, f1:{f1.shape}, p{p.shape}, r{r.shape}, py:{len(py)}, ap:{ap.shape}")
 

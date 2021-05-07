@@ -720,6 +720,8 @@ def load_mosaic(self, index):
                                        shear=self.hyp['shear'],
                                        perspective=self.hyp['perspective'],
                                        border=self.mosaic_border)  # border to remove
+    
+    img4 = custom_augmentations(img4)
 
     return img4, labels4
 
@@ -794,8 +796,44 @@ def load_mosaic9(self, index):
                                        shear=self.hyp['shear'],
                                        perspective=self.hyp['perspective'],
                                        border=self.mosaic_border)  # border to remove
+    
+    img9 = custom_augmentations(img9)
 
     return img9, labels9
+
+
+def custom_augmentations(img):
+    # Adjust brightness randomly
+    img = cv2.convertScaleAbs(img, alpha=1.0, beta=random.uniform(-50, 50))
+
+    # Blur randomly
+    size = random.choices(population=[1, 3, 5, 7],
+                          cum_weights=[0.682, 0.955, 0.997, 1.00])
+    img = cv2.GaussianBlur(img,(size,size),0)
+
+    # Adjust color temperature
+    tint = random.choice(population=[[1.000, 1.000, 1.000],
+                                     [0.900, 0.724, 0.290],
+                                     [1.000, 0.867, 0.437],
+                                     [0.804, 0.796, 0.980],
+                                     [0.682, 0.726, 0.990]],
+                        cum_weights=[0.60, 0.70, 0.80, 0.90, 1.0]    
+    img[:,:,0] =  img[:,:,0] * tint[2]
+    img[:,:,1] =  img[:,:,1] * tint[1]
+    img[:,:,2] =  img[:,:,2] * tint[0]
+    img = img.astype('uint8')  # not sure this is needed
+
+    # salt & pepper noise
+    snr = 1.0 - abs(random.uniform(-0.03, 0.03))
+    h, w, c = img.shape
+    mask = np.random.choice((0, 1, 2),
+                            size = (h, w, 1),
+                            p = [snr, (1-snr)/2.0, (1-snr)/2.0])
+    mask = np.repeat(mask, c, axis=2)
+    img[mask==1] = 255 #salt
+    img[mask==2] = 0 #pepper
+
+    return img
 
 
 def replicate(img, labels):
