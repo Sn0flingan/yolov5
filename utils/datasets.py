@@ -808,16 +808,16 @@ def custom_augmentations(img):
 
     # Blur randomly
     size = random.choices(population=[1, 3, 5, 7],
-                          cum_weights=[0.682, 0.955, 0.997, 1.00])
+                          cum_weights=[0.682, 0.955, 0.997, 1.00])[0]
     img = cv2.GaussianBlur(img,(size,size),0)
 
     # Adjust color temperature
-    tint = random.choice(population=[[1.000, 1.000, 1.000],
-                                     [0.900, 0.724, 0.290],
-                                     [1.000, 0.867, 0.437],
-                                     [0.804, 0.796, 0.980],
-                                     [0.682, 0.726, 0.990]],
-                        cum_weights=[0.60, 0.70, 0.80, 0.90, 1.0]    
+    tint = random.choices(population=[[1.000, 1.000, 1.000],
+                                      [0.900, 0.724, 0.290],
+                                      [1.000, 0.867, 0.437],
+                                      [0.804, 0.796, 0.980],
+                                      [0.682, 0.726, 0.990]],
+                        cum_weights=[0.60, 0.70, 0.80, 0.90, 1.0])[0]
     img[:,:,0] =  img[:,:,0] * tint[2]
     img[:,:,1] =  img[:,:,1] * tint[1]
     img[:,:,2] =  img[:,:,2] * tint[0]
