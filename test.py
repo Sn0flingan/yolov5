@@ -37,6 +37,7 @@ def test(data,
          plots=True,
          wandb_logger=None,
          compute_loss=None,
+         half_precision=True,
          is_coco=False):
     # Initialize/load model and set device
     training = model is not None
@@ -61,7 +62,7 @@ def test(data,
         #     model = nn.DataParallel(model)
 
     # Half
-    half = device.type != 'cpu'  # half precision only supported on CUDA
+    half = device.type != 'cpu' and half_precision  # half precision only supported on CUDA
     if half:
         model.half()
 
@@ -156,7 +157,7 @@ def test(data,
                                  "domain": "pixel"} for *xyxy, conf, cls in pred.tolist()]
                     boxes = {"predictions": {"box_data": box_data, "class_labels": names}}  # inference-space
                     wandb_images.append(wandb_logger.wandb.Image(img[si], boxes=boxes, caption=path.name))
-                wandb_logger.log_training_progress(predn, path, names)  # logs dsviz tables
+            wandb_logger.log_training_progress(predn, path, names) if wandb_logger and wandb_logger.wandb_run else None
 
             # Append to pycocotools JSON dictionary
             if save_json:

@@ -23,7 +23,7 @@ except ImportError:
 WANDB_ARTIFACT_PREFIX = 'wandb-artifact://'
 
 
-def remove_prefix(from_string, prefix):
+def remove_prefix(from_string, prefix=WANDB_ARTIFACT_PREFIX):
     return from_string[len(prefix):]
 
 
@@ -33,35 +33,73 @@ def check_wandb_config_file(data_config_file):
         return wandb_config
     return data_config_file
 
+def get_run_info(run_path):
+    run_path = Path(remove_prefix(run_path, WANDB_ARTIFACT_PREFIX))
+    run_id = run_path.stem
+    project = run_path.parent.stem
+    model_artifact_name = 'run_' + run_id + '_model'
+    return run_id, project, model_artifact_name
 
-def resume_and_get_id(opt):
-    # It's more elegant to stick to 1 wandb.init call, but as useful config data is overwritten in the WandbLogger's wandb.init call
+def check_wandb_resume(opt):
+    process_wandb_config_ddp_mode(opt) if opt.global_rank not in [-1, 0] else None
     if isinstance(opt.resume, str):
         if opt.resume.startswith(WANDB_ARTIFACT_PREFIX):
-            run_path = Path(remove_prefix(opt.resume, WANDB_ARTIFACT_PREFIX))
-            run_id = run_path.stem
-            project = run_path.parent.stem
-            model_artifact_name = WANDB_ARTIFACT_PREFIX + 'run_' + run_id + '_model'
-            assert wandb, 'install wandb to resume wandb runs'
-            # Resume wandb-artifact:// runs here| workaround for not overwriting wandb.config
-            run = wandb.init(id=run_id, project=project, resume='allow')
-            opt.resume = model_artifact_name
-            return run
+            if opt.global_rank not in [-1, 0]: # For resuming DDP runs
+                run_id, project, model_artifact_name = get_run_info(opt.resume)
+                api = wandb.Api()
+                artifact = api.artifact(project + '/' + model_artifact_name + ':latest')
+                modeldir = artifact.download()
+                opt.weights = str(Path(modeldir) / "last.pt")
+            return True
     return None
 
+def process_wandb_config_ddp_mode(opt):
+    with open(opt.data) as f:
+        data_dict = yaml.load(f, Loader=yaml.SafeLoader)  # data dict
+    train_dir, val_dir = None, None
+    if isinstance(data_dict['train'], str) and data_dict['train'].startswith(WANDB_ARTIFACT_PREFIX):
+        api = wandb.Api()
+        train_artifact = api.artifact(remove_prefix(data_dict['train']) + ':' + opt.artifact_alias)
+        train_dir = train_artifact.download()
+        train_path = Path(train_dir) / 'data/images/'
+        data_dict['train'] = str(train_path)
+        
+    if isinstance(data_dict['val'], str) and data_dict['val'].startswith(WANDB_ARTIFACT_PREFIX):
+        api = wandb.Api()
+        val_artifact = api.artifact(remove_prefix(data_dict['val']) + ':' + opt.artifact_alias)
+        val_dir = val_artifact.download()
+        val_path = Path(val_dir) / 'data/images/'
+        data_dict['val'] = str(val_path)
+    if train_dir or val_dir:
+        ddp_data_path = str(Path(val_dir) / 'wandb_local_data.yaml') 
+        with open(ddp_data_path, 'w') as f:
+            yaml.dump(data_dict, f)
+        opt.data = ddp_data_path
+    
+        
 
 class WandbLogger():
     def __init__(self, opt, name, run_id, data_dict, job_type='Training'):
         # Pre-training routine --
         self.job_type = job_type
         self.wandb, self.wandb_run, self.data_dict = wandb, None if not wandb else wandb.run, data_dict
-        if self.wandb:
+        # It's more elegant to stick to 1 wandb.init call, but useful config data is overwritten in the WandbLogger's wandb.init call
+        if isinstance(opt.resume, str): # checks resume from artifact 
+            if opt.resume.startswith(WANDB_ARTIFACT_PREFIX):
+                run_id, project, model_artifact_name = get_run_info(opt.resume)
+                model_artifact_name = WANDB_ARTIFACT_PREFIX + model_artifact_name
+                assert wandb, 'install wandb to resume wandb runs'
+                # Resume wandb-artifact:// runs here| workaround for not overwriting wandb.config
+                self.wandb_run = wandb.init(id=run_id, project=project, resume='allow')
+                opt.resume = model_artifact_name
+        elif self.wandb:
             self.wandb_run = wandb.init(config=opt,
                                         resume="allow",
                                         project='YOLOv5' if opt.project == 'runs/train' else Path(opt.project).stem,
                                         name=name,
                                         job_type=job_type,
-                                        id=run_id) if not wandb.run else wandb.run
+                                        id=run_id) if not wandb.run else wandb.run      
+        if self.wandb_run:
             if self.job_type == 'Training':
                 if not opt.resume:
                     wandb_data_dict = self.check_and_upload_dataset(opt) if opt.upload_dataset else data_dict
@@ -120,7 +158,7 @@ class WandbLogger():
         return data_dict
 
     def download_dataset_artifact(self, path, alias):
-        if path.startswith(WANDB_ARTIFACT_PREFIX):
+        if isinstance(path, str) and path.startswith(WANDB_ARTIFACT_PREFIX):
             dataset_artifact = wandb.use_artifact(remove_prefix(path, WANDB_ARTIFACT_PREFIX) + ":" + alias)
             assert dataset_artifact is not None, "'Error: W&B dataset artifact doesn\'t exist'"
             datadir = dataset_artifact.download()
@@ -191,7 +229,9 @@ class WandbLogger():
     def create_dataset_table(self, dataset, class_to_id, name='dataset'):
         # TODO: Explore multiprocessing to slpit this loop parallely| This is essential for speeding up the the logging
         artifact = wandb.Artifact(name=name, type="dataset")
-        for img_file in tqdm([dataset.path]) if Path(dataset.path).is_dir() else tqdm(dataset.img_files):
+        img_files = tqdm([dataset.path]) if isinstance(dataset.path, str) and Path(dataset.path).is_dir() else None
+        img_files = tqdm(dataset.img_files) if not img_files else img_files
+        for img_file in img_files:
             if Path(img_file).is_dir():
                 artifact.add_dir(img_file, name='data/images')
                 labels_path = 'labels'.join(dataset.path.rsplit('images', 1))
